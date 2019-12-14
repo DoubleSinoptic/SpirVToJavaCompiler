@@ -207,7 +207,6 @@ uint32_t unmapPointer(uint32_t pointerTypeId)
 
 std::string loadInt(uint32_t varIndex, std::stringstream& o) 
 {
-	std::string opIs = "_tmp" + std::to_string(opInc++);
 	const auto& var = allVariables[varIndex];
 	if (var.constantId != -1) {
 		return std::to_string(allConstantsX[var.constantId]->q<int32_t>());
@@ -285,7 +284,7 @@ const char* flags(T f, uint32_t flags)
 	return (*strings.find(result)).c_str();
 }
 
-void process(const std::vector<uint8_t>& binary, std::stringstream& output, std::stringstream& header, std::stringstream& ctor)
+void process(const std::vector<uint8_t>& binary, std::stringstream& end, std::stringstream& header, std::stringstream& ctor)
 {
 	const uint8_t* p = binary.data();
 
@@ -298,11 +297,14 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 	uint32_t shem = tread<uint32_t>(p);
 	uint32_t functionAlloc = 0;
 	uint32_t privateAlloc = 0;
+
+	std::stringstream output;
+
 	ctor << "void initialize() {\n";
 	auto resolveConstant = [&](uint32_t constId, uint32_t type)
 	{
 		auto c = allConstantsX[constId];
-		output << "int _vO" + std::to_string(constId) + " = " + std::to_string(privateAlloc) + ";\n";
+		header << "final int _vO" + std::to_string(constId) + " = " + std::to_string(privateAlloc) + ";\n";
 		allVariables[constId] = { int32_t(constId), type , "privateStorage",  "_vO" + std::to_string(constId) };
 		privateAlloc += allTypes[type]->length();
 
@@ -325,8 +327,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 	{
 		auto t = allTypes[resultType];
 		auto& allocType = t;
-		output << "sp -= " + std::to_string(allocType->length()) + ";\n";
-		output << "int     _vO" + std::to_string(resultId) + " = sp;\n";
+		output << "final int _vO" + std::to_string(resultId) + " = sp + " + std::to_string(functionAlloc) + ";\n";
 		allVariables[resultId] = { -1, resultType, "stackStorage", "_vO" + std::to_string(resultId) };
 		output << "Rsx." + op + t->marshal() + "("+ allVariables[resultId].memory+","+ allVariables[resultId].offset+", "+ allVariables[op1].memory+", "+ allVariables[op1].offset+");\n";
 
@@ -336,8 +337,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 	{
 		auto t = allTypes[resultType];
 		auto& allocType = t;
-		output << "sp -= " + std::to_string(allocType->length()) + ";\n";
-		output << "int     _vO" + std::to_string(resultId) + " = sp;\n";
+		output << "final int _vO" + std::to_string(resultId) + " = sp + " + std::to_string(functionAlloc) + ";\n";
 		allVariables[resultId] = { -1, resultType, "stackStorage", "_vO" + std::to_string(resultId) };
 
 		output << "Rsx." + op  + t->marshal() + 
@@ -649,14 +649,13 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			}
 			if (storageClass == 7) {
 				auto& allocType = allTypes[unmapPointer(resultType)];
-				output << "sp -= " + std::to_string(allocType->length()) + ";\n";
-				output << "int     _vO" + std::to_string(resultId) + " = sp;\n";
+				output << "final int _vO" + std::to_string(resultId) + " = sp + " + std::to_string(functionAlloc) + ";\n";
 				allVariables[resultId] = { -1, resultType, "stackStorage", "_vO" + std::to_string(resultId) };
 				functionAlloc += allocType->length();			
 			} 
 			else if (storageClass == 6) {
 				auto& allocType = allTypes[unmapPointer(resultType)];
-				output << "int     _vO" + std::to_string(resultId) + " = " + std::to_string(privateAlloc) + ";\n";
+				output << "final int _vO" + std::to_string(resultId) + " = " + std::to_string(privateAlloc) + ";\n";
 				allVariables[resultId] = { -1, resultType, "privateStorage", "_vO" + std::to_string(resultId) };
 				privateAlloc += allocType->length();
 			}
@@ -682,6 +681,11 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			output << "}\n";
 			printf("\tOpFunctionEnd");
 			printf("\n");
+
+			end << "void function() {\n";
+			end << "sp -= " + std::to_string(functionAlloc) + ";\n";
+			end << output.str();
+			output.clear();
 		}
 		else if (instr == 248) {
 			uint32_t resultId = rw();
@@ -696,9 +700,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t functionType = rw();
 			functionAlloc = 0;
 			printf("$%d =\tOpFunction $%d (%s) $%d", resultId, resultType, flags(FunctionControl, functionControl), functionType);
-			printf("\n");
-
-			output << "void function() {\n";
+			printf("\n");		
 		}
 
 
@@ -745,8 +747,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			printf("$%d =\tOpLoad $%d $%d", resultId, resultType, pointer);
 
 			auto allocType = allTypes[resultType];
-			output << "sp -= " + std::to_string(allocType->length()) + ";\n";
-			output << "int     _vO" + std::to_string(resultId) + " = sp;\n";
+			output << "final int _vO" + std::to_string(resultId) + " = sp + " + std::to_string(functionAlloc) + ";\n";
 
 			allVariables[resultId] = { -1, resultType, "stackStorage",  "_vO" + std::to_string(resultId) };
 
@@ -777,7 +778,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 				throw std::runtime_error("invalid access type");
 
 			allVariables[resultId] = { -1, resultType, var.memory, "_vO" + std::to_string(resultId) };
-			output << "int     _vO" + std::to_string(resultId) + " =_vO" + std::to_string(compisite) + " + " + std::to_string(memOffset) + ";\n";
+			output << "final int _vO" + std::to_string(resultId) + " =_vO" + std::to_string(compisite) + " + " + std::to_string(memOffset) + ";\n";
 			printf("\n");
 		}
 		else if (instr == 80) {		
@@ -785,8 +786,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t resultId = rw();
 			
 			auto t = allTypes[resultType];;
-			output << "sp -= " + std::to_string(t->length()) + ";\n";
-			output << "int     _vO" + std::to_string(resultId) + " = sp;\n";
+			output << "int     _vO" + std::to_string(resultId) + " = sp + " + std::to_string(functionAlloc) + ";\n";
 			functionAlloc += t->length();
 			allVariables[resultId] = { -1, resultType, "stackStorage","_vO" + std::to_string(resultId) };
 
@@ -841,7 +841,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 
 			allVariables[resultId] = {-1, resultType, baseVariable.memory, "_vO" + std::to_string(resultId) };
 
-			output << "int     _vO" + std::to_string(resultId) + " = "+ baseVariable.offset + "+" + resultSums + ";\n";
+			output << "final int _vO" + std::to_string(resultId) + " = "+ baseVariable.offset + "+" + resultSums + ";\n";
 
 			printf("\n");
 		}	
@@ -984,8 +984,8 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 		if (x != "privateStorage")
 			header << "public  Buffer  " + x + " = null;\n";
 	}
-	header << "private float[] privateStorage = Rsx.allocate(" + std::to_string(privateAlloc) +");\n";
-	header << "private float[] stackStorage   = Rsx.allocate(128);\n";
+	header << "private final float[] privateStorage = Rsx.allocate(" + std::to_string(privateAlloc) +");\n";
+	header << "private final float[] stackStorage   = Rsx.allocate(128);\n";
 	header << "private int     sp             = 128;\n";
 	ctor << "}\n";
 }
