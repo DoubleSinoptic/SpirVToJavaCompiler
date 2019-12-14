@@ -11,6 +11,8 @@
 #include <algorithm>
 #include "./SpirVType.h"
 
+#define printf()
+
 template<typename T>
 T tread(const uint8_t*& addr) 
 {
@@ -1039,24 +1041,20 @@ int main(int argc, char** argv)
 		std::vector<uint8_t> l(length, 0);
 		f.read((char*)l.data(), length);
 		process(l, s, eg, ctor);
-		printf("==============\n");
-		printf("%s", ctor.str().c_str());
-		printf("%s", eg.str().c_str());
-		printf("%s", s.str().c_str());
-		printf("==============\n");
+		std::cout << ctor.str();
+		std::cout << eg.str();
+		std::cout << s.str();
 	}
 
-	for (auto& x : allTypes) {
+	//print data
+	/*for (auto& x : allTypes) {
 		printf("%d: \t%s\n", x.first, x.second->marshal().c_str());
 		printf("%d: \t%s\n", x.first, x.second->marshal2().c_str());
 	}
-
 
 	for (auto& x : allConstantsX) {
 		printf("%d = ", x.first);
 		print_all_object(x.second);
 		printf("\n");
-	}
-	
-    std::cout << "all good!\n";
+	}*/
 }
