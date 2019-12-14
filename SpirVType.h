@@ -7,14 +7,20 @@
 
 struct type_base
 {
+	type_base(const type_base&) = delete;
+	type_base& operator=(const type_base&) = delete;
+	type_base() = default;
+
 	virtual ~type_base() = default;
 	virtual size_t length() const = 0;
 	virtual std::string marshal() const = 0;
 	virtual std::string marshal2() const = 0;
-	bool is(std::string marsh) const 
+
+	bool is(const std::string& marsh) const 
 	{
 		return marshal() == marsh;
 	}
+
 	virtual std::shared_ptr<const type_base> accessTo(uint32_t index, uint32_t& offset) const 
 	{
 		throw std::runtime_error("type can not accessable");
