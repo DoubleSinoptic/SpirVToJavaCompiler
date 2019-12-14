@@ -175,10 +175,12 @@ std::map<uint32_t, object>	 allConstantsX;
 
 
 struct variable {
-	int32_t  constantId;
-	uint32_t type;
+	int32_t		constantId;
+	uint32_t	type;
+	std::string memory;
+	std::string offset;
 };
-std::map<uint32_t, variable>	 allVars;
+std::map<uint32_t, variable> allVariables;
 
 //resources
 std::set<std::string> resources;
@@ -203,11 +205,11 @@ uint32_t unmapPointer(uint32_t pointerTypeId)
 std::string loadInt(uint32_t varIndex, std::stringstream& o) 
 {
 	std::string opIs = "_tmp" + std::to_string(opInc++);
-	auto var = allVars[varIndex];
+	const auto& var = allVariables[varIndex];
 	if (var.constantId != -1) {
 		return std::to_string(allConstantsX[var.constantId]->q<int32_t>());
 	} else {
-		o << "int " + opIs + " =  Float.floatToIntBits(_vM" + std::to_string(varIndex) + "[_vO" + std::to_string(varIndex) + "]);\n";
+		o << "int " + opIs + " =  Float.floatToIntBits("+var.memory+"["+var.offset+"]);\n";
 		return opIs;
 	}
 }
@@ -298,10 +300,8 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 	auto resolveConstant = [&](uint32_t constId, uint32_t type)
 	{
 		auto c = allConstantsX[constId];
-
-		output << "float[] _vM" + std::to_string(constId) + " = privateStorage;\n";
-		output << "int     _vO" + std::to_string(constId) + " = " + std::to_string(privateAlloc) + ";\n";
-
+		output << "int _vO" + std::to_string(constId) + " = " + std::to_string(privateAlloc) + ";\n";
+		allVariables[constId] = { int32_t(constId), type , "privateStorage",  "_vO" + std::to_string(constId) };
 		privateAlloc += allTypes[type]->length();
 
 		std::vector<float> m;
@@ -316,32 +316,32 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 				data += ",";
 		}
 
-		ctor << "Rsx.setlf(_vM" + std::to_string(constId) + ",_vO" + std::to_string(constId) + ", " + data + ");\n";
+		ctor << "Rsx.setlf("+ allVariables[constId] .memory+", " + allVariables[constId].offset +", " + data + ");\n";
+	
 	};
-	auto genericOp1 = [&](uint32_t resultType, uint32_t resultId, uint32_t op1, const std::string& op)
+	auto genericOp1Arg = [&](uint32_t resultType, uint32_t resultId, uint32_t op1, const std::string& op)
 	{
 		auto t = allTypes[resultType];
 		auto& allocType = t;
 		output << "sp -= " + std::to_string(allocType->length()) + ";\n";
-		output << "float[] _vM" + std::to_string(resultId) + " = stackStorage;\n";
 		output << "int     _vO" + std::to_string(resultId) + " = sp;\n";
-
-
-		output << "Rsx." + op + t->marshal() + "(_vM" + std::to_string(resultId) + ",_vO" + std::to_string(resultId) + ",_vM" + std::to_string(op1) + ",_vO" + std::to_string(op1) + ");\n";
+		allVariables[resultId] = { -1, resultType, "stackStorage", "_vO" + std::to_string(resultId) };
+		output << "Rsx." + op + t->marshal() + "("+ allVariables[resultId].memory+","+ allVariables[resultId].offset+", "+ allVariables[op1].memory+", "+ allVariables[op1].offset+");\n";
 
 		functionAlloc += allocType->length();
 	};
-	auto genericOp2 = [&](uint32_t resultType, uint32_t resultId, uint32_t op1, uint32_t op2, const std::string& op)
+	auto genericOp2Arg = [&](uint32_t resultType, uint32_t resultId, uint32_t op1, uint32_t op2, const std::string& op)
 	{
 		auto t = allTypes[resultType];
 		auto& allocType = t;
 		output << "sp -= " + std::to_string(allocType->length()) + ";\n";
-		output << "float[] _vM" + std::to_string(resultId) + " = stackStorage;\n";
 		output << "int     _vO" + std::to_string(resultId) + " = sp;\n";
+		allVariables[resultId] = { -1, resultType, "stackStorage", "_vO" + std::to_string(resultId) };
 
-
-		output << "Rsx." + op  + t->marshal() + "(_vM" + std::to_string(resultId) + ",_vO" + std::to_string(resultId) + ",_vM" + std::to_string(op1) + ",_vO"+ std::to_string(op1) +",_vM"+ std::to_string(op2) +",_vO"+ std::to_string(op2) +");\n";
-
+		output << "Rsx." + op  + t->marshal() + 
+			"("+ allVariables[resultId].memory +", "+ allVariables[resultId].offset + 
+			","+ allVariables[op1].memory +", "+ allVariables[op1].offset +","
+			+ allVariables[op2].memory +", "+ allVariables[op2].offset +");\n";
 		functionAlloc += allocType->length();
 	};
 
@@ -595,7 +595,6 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 				printf(" $%d",  x);
 			}
 			allConstantsX[resultId] = createObject<std::vector<object>>(objects);
-			allVars[resultId] = {int32_t(resultId), resultType};
 			printf("\n");
 			resolveConstant(resultId, resultType);
 		}
@@ -603,7 +602,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t resultType = rw();
 			uint32_t resultId = rw();
 			printf("$%d =\tOpConstant $%d", resultId, resultType);
-			allVars[resultId] = { int32_t(resultId), resultType };
+		
 			auto type = allTypes[resultType];
 
 			if (std::dynamic_pointer_cast<ptr_type>(type)) {
@@ -646,24 +645,17 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			for (int i = rededWords; i < wordCount; i++) {
 				printf(" $%d", rw());
 			}
-
-			allVars[resultId] = { -1, resultType };
-			//stack alloc
 			if (storageClass == 7) {
 				auto& allocType = allTypes[unmapPointer(resultType)];
 				output << "sp -= " + std::to_string(allocType->length()) + ";\n";
-				output << "float[] _vM" + std::to_string(resultId) + " = stackStorage;\n";
 				output << "int     _vO" + std::to_string(resultId) + " = sp;\n";
-
-				functionAlloc += allocType->length();
-				
-			}
+				allVariables[resultId] = { -1, resultType, "stackStorage", "_vO" + std::to_string(resultId) };
+				functionAlloc += allocType->length();			
+			} 
 			else if (storageClass == 6) {
-
 				auto& allocType = allTypes[unmapPointer(resultType)];
-				output << "float[] _vM" + std::to_string(resultId) + " = privateStorage;\n";
 				output << "int     _vO" + std::to_string(resultId) + " = " + std::to_string(privateAlloc) + ";\n";
-
+				allVariables[resultId] = { -1, resultType, "privateStorage", "_vO" + std::to_string(resultId) };
 				privateAlloc += allocType->length();
 			}
 			else if (storageClass == 2) {
@@ -671,20 +663,14 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 				std::string registerName = "register" + std::to_string(regisrerId);
 				resources.insert(registerName);
 				auto& allocType = allTypes[unmapPointer(resultType)];
-				output << "float[] _vM" + std::to_string(resultId) + ";\n";
-				output << "int     _vO" + std::to_string(resultId) + ";\n";
-				ctor << "_vM" + std::to_string(resultId) + " = " + registerName + ".memory;\n";
-				ctor << "_vO" + std::to_string(resultId) + " = " + registerName + ".offset;\n";
+				allVariables[resultId] = { -1, resultType, registerName + ".memory", registerName + ".offset" };
 			}
 			else if (storageClass == 1) {
 				uint32_t regisrerId = buildIn[resultId];
 				std::string registerName = "input" + std::to_string(regisrerId);
 				resources.insert(registerName);
 				auto& allocType = allTypes[unmapPointer(resultType)];
-				output << "float[] _vM" + std::to_string(resultId) + ";\n";
-				output << "int     _vO" + std::to_string(resultId) + ";\n";
-				ctor << "_vM" + std::to_string(resultId) + " = " + registerName + ".memory;\n";
-				ctor << "_vO" + std::to_string(resultId) + " = " + registerName + ".offset;\n";
+				allVariables[resultId] = { -1, resultType, registerName + ".memory", registerName + ".offset" };
 
 			}
 			printf("\n");
@@ -720,46 +706,31 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 		
 			printf("\tOpStore $%d $%d", pointer, object);
 
-			auto& pointerR = allVars[pointer];
-			auto& objectR = allVars[object];
-			
+			const auto& pointerR = allVariables[pointer];
+			const auto& objectR = allVariables[object];
 			
 			std::string mem;
 			std::string offset;
 			if (pointerR.constantId != -1) {
-				auto tmp = "_tmp" + std::to_string(opInc++);
 				auto c = allConstantsX[pointerR.constantId];
 				if (!c->is<ptr>()) {
 					throw std::runtime_error("invalid ptr const");
 				}
 				ptr g = c->q<ptr>();
-				output << "float[] _vXP" + tmp + " = Rsx.getPage(" + std::to_string(g.page) + ");\n";
-				output << "float[] _vXO" + tmp + " = " + std::to_string(g.offset) + ";\n";
-				mem = "_vXP" + tmp;
-				offset = "_vXO" + tmp;
+				mem = "Rsx.getPage(" + std::to_string(g.page) + ")";
+				offset = std::to_string(g.offset);
 			}
 			else {
-				mem = "_vM" + std::to_string(pointer);
-				offset = "_vO" + std::to_string(pointer);
+				mem = pointerR.memory;
+				offset = pointerR.offset;
 			}
 
-			/*if (objectR.constantId != -1) {
-				auto c = allConstantsX[objectR.constantId];
-				std::vector<float> m;
-				constantStore(c, m);
-				std::string data;
-				for (int i = 0; i < m.size(); i++) {
-					data += std::to_string(m[i]);
-					if (i != m.size() - 1)
-						data += ",";
-				}
-
-				output << "Rsx.setlf(" + mem + "," + offset + ", " + data + ");\n";
-			}
-			else*/ {
-					output << "Rsx.setcpy(" + mem + "," + offset + ", _vM" + std::to_string(object) + ", _vO" +std::to_string(object) +", " + std::to_string(allTypes[objectR.type]->length()) + ");//STORE\n";
-			}
-
+			uint32_t copyLength = allTypes[objectR.type]->length();
+			if (copyLength == 1) 
+				output << mem + "[" + offset + "] = " + objectR.memory + "[" + objectR.offset + "];//STORE\n";
+			else 
+				output << "Rsx.setcpy(" + mem + "," + offset + "," + objectR.memory + "," + objectR.offset +"," + std::to_string(copyLength) + ");//STORE\n";
+		
 			for (int i = rededWords; i < wordCount; i++) {
 				printf(" %d", rw());
 			}
@@ -773,14 +744,13 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 
 			auto allocType = allTypes[resultType];
 			output << "sp -= " + std::to_string(allocType->length()) + ";\n";
-			output << "float[] _vM" + std::to_string(resultId) + " = stackStorage;\n";
 			output << "int     _vO" + std::to_string(resultId) + " = sp;\n";
 
-			allVars[resultId] = {-1, resultType };
+			allVariables[resultId] = { -1, resultType, "stackStorage",  "_vO" + std::to_string(resultId) };
 
 			functionAlloc += allocType->length();
 
-			output << "Rsx.setcpy(_vM" + std::to_string(resultId) + ",_vO" + std::to_string(resultId) + ",_vM" + std::to_string(pointer) + ",_vO" + std::to_string(pointer) + ", " + std::to_string(allTypes[resultType]->length()) + ");//LOAD\n";
+			output << "Rsx.setcpy("+ allVariables[resultId].memory + ", "+ allVariables[resultId].offset + "," + allVariables[pointer].memory + "," + allVariables[pointer].offset +", " + std::to_string(allTypes[resultType]->length()) + ");//LOAD\n";
 			
 			printf("\n");
 		}
@@ -789,7 +759,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t resultId = rw();
 			uint32_t compisite = rw();
 
-			auto var = allVars[compisite];
+			const auto& var = allVariables[compisite];
 
 			printf("$%d =\tOpCompositeExtract $%d $%d", resultId, resultType, compisite);
 			//std::string opIs = "_tmp" + std::to_string(opInc++);
@@ -804,11 +774,8 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			if (allTypes[resultType]->marshal() != baseType->marshal())
 				throw std::runtime_error("invalid access type");
 
-			allVars[resultId] = { -1, resultType };
-
-			output << "float[] _vM" + std::to_string(resultId) + " = _vM" + std::to_string(compisite) + ";\n";
+			allVariables[resultId] = { -1, resultType, var.memory, "_vO" + std::to_string(resultId) };
 			output << "int     _vO" + std::to_string(resultId) + " =_vO" + std::to_string(compisite) + " + " + std::to_string(memOffset) + ";\n";
-
 			printf("\n");
 		}
 		else if (instr == 80) {		
@@ -817,22 +784,19 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			
 			auto t = allTypes[resultType];;
 			output << "sp -= " + std::to_string(t->length()) + ";\n";
-			output << "float[] _vM" + std::to_string(resultId) + " = stackStorage;\n";
 			output << "int     _vO" + std::to_string(resultId) + " = sp;\n";
 			functionAlloc += t->length();
+			allVariables[resultId] = { -1, resultType, "stackStorage","_vO" + std::to_string(resultId) };
 
 			printf("$%d =\tOpCompositeConstruct $%d ", resultId, resultType);
 			uint32_t copyOff = 0;
 			for (int i = rededWords; i < wordCount; i++) {
 				auto var = rw();
 				printf(" $%d ", var);
-				auto varType = allTypes[allVars[var].type];
-
-				output << "Rsx.setcpy(_vM" + std::to_string(resultId) + ",_vO" + std::to_string(resultId) + " + " + std::to_string(copyOff) + ",_vM" + std::to_string(var) + ",_vO" + std::to_string(var) + ", " + std::to_string(varType->length()) + ");\n";
-
+				auto varType = allTypes[allVariables[var].type];
+				output << "Rsx.setcpy(" + allVariables[resultId].memory + "," + allVariables[resultId].offset + " + " + std::to_string(copyOff) + "," + allVariables[var].memory + "," + allVariables[var].offset + ", " + std::to_string(varType->length()) + ");\n";
 				copyOff += varType->length();
 			}
-			allVars[resultId] = {-1, resultType };
 
 			printf("\n");
 		}
@@ -841,19 +805,16 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t resultId = rw();
 			uint32_t base = rw();
 
-			auto var = allVars[base];
-			if (resultId == 199) {
+			const auto& baseVariable = allVariables[base];
 
-				printf("");
-			}
 			printf("$%d =\tOpAccessChain $%d $%d", resultId, resultType, base);
 			std::string opIs = "_tmp" + std::to_string(opInc++);
 			bool isFirst = true;
-			auto baseType = std::static_pointer_cast<const type_base>(allTypes[unmapPointer(var.type)]);
+			auto baseType = std::static_pointer_cast<const type_base>(allTypes[unmapPointer(baseVariable.type)]);
 			for (int i = rededWords; i < wordCount; i++) {
 				auto gafs = rw();
 				printf(" $%d", gafs);
-				auto var = allVars[gafs];
+				auto var = allVariables[gafs];
 				if (var.constantId != -1) {
 					uint32_t memOffset = 0;
 					baseType = baseType->accessTo(allConstantsX[gafs]->q<int32_t>(), memOffset);
@@ -864,10 +825,8 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 						}
 						else {
 							output << opIs + " += " + std::to_string(memOffset) + ";\n";
-						}
-						
-				}
-				else {
+						}					
+				} else {
 					std::string id = loadInt(gafs, output); 
 					if (isFirst) {
 						output << "int " + opIs + " = " + id + " * " + std::to_string(baseType->signleType()->length()) + ";\n";
@@ -884,10 +843,9 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			if (allTypes[unmapPointer(resultType)]->marshal() != baseType->marshal())
 				throw std::runtime_error("invalid access type");
 
-			allVars[resultId] = {-1, resultType };
+			allVariables[resultId] = {-1, resultType, baseVariable.memory, "_vO" + std::to_string(resultId) };
 
-			output << "float[] _vM" + std::to_string(resultId) + " = _vM" + std::to_string(base)+ ";\n";
-			output << "int     _vO" + std::to_string(resultId) + " =_vO" + std::to_string(base) + " + " + opIs + ";\n";
+			output << "int     _vO" + std::to_string(resultId) + " = "+ baseVariable.offset + " + " + opIs + ";\n";
 
 			printf("\n");
 		}	
@@ -897,8 +855,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpIAdd $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "add");
-			allVars[resultId] = {-1, resultType};
+			genericOp2Arg(resultType, resultId, op1, op2, "add");
 			printf("\n");
 		}
 		else if (instr == 129) {
@@ -907,8 +864,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpFAdd $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "add");
-			allVars[resultId] = { -1, resultType };
+			genericOp2Arg(resultType, resultId, op1, op2, "add");
 			printf("\n");
 		}
 		else if (instr == 131) {
@@ -917,8 +873,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpFSub $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "sub");
-			allVars[resultId] = { -1, resultType };
+			genericOp2Arg(resultType, resultId, op1, op2, "sub");
 			printf("\n");
 		}
 		else if (instr == 130) {
@@ -927,8 +882,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpISub $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "sub");
-			allVars[resultId] = { -1, resultType };
+			genericOp2Arg(resultType, resultId, op1, op2, "sub");
 			printf("\n");
 		}
 		else if (instr == 132) {
@@ -937,8 +891,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpIMul $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "mul");
-			allVars[resultId] = { -1, resultType };
+			genericOp2Arg(resultType, resultId, op1, op2, "mul");
 			printf("\n");
 		}
 		else if (instr == 133) {
@@ -947,8 +900,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpFMul $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "mul");
-			allVars[resultId] = { -1, resultType };
+			genericOp2Arg(resultType, resultId, op1, op2, "mul");
 			printf("\n");
 		}
 		else if (instr == 124) {
@@ -956,8 +908,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t resultId = rw();
 			uint32_t op1 = rw();
 			printf("$%d =\tOpBitcast $%d $%d", resultId, resultType, op1);
-			genericOp1(resultType, resultId, op1, "bitcast");
-			allVars[resultId] = { -1, resultType };
+			genericOp1Arg(resultType, resultId, op1, "bitcast");
 			printf("\n");
 		}
 		else if (instr == 145) {
@@ -966,8 +917,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpMatrixTimesVector $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "mXv" + allTypes[allVars[op1].type]->marshal() + "X" + allTypes[allVars[op2].type]->marshal());
-			allVars[resultId] = { -1, resultType };
+			genericOp2Arg(resultType, resultId, op1, op2, "mXv" + allTypes[allVariables[op1].type]->marshal() + "X" + allTypes[allVariables[op2].type]->marshal());
 			printf("\n");
 		}
 		else if (instr == 146) {
@@ -976,8 +926,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpMatrixTimesMatrix $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "mXm" + allTypes[allVars[op1].type]->marshal() + "X" + allTypes[allVars[op2].type]->marshal());
-			allVars[resultId] = { -1, resultType };
+			genericOp2Arg(resultType, resultId, op1, op2, "mXm" + allTypes[allVariables[op1].type]->marshal() + "X" + allTypes[allVariables[op2].type]->marshal());
 			printf("\n");
 		}
 
@@ -987,8 +936,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpVectorTimesScalar $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "vXs" + allTypes[allVars[op1].type]->marshal() + "X" + allTypes[allVars[op2].type]->marshal());
-			allVars[resultId] = { -1, resultType };
+			genericOp2Arg(resultType, resultId, op1, op2, "vXs" + allTypes[allVariables[op1].type]->marshal() + "X" + allTypes[allVariables[op2].type]->marshal());
 			printf("\n");
 		}
 
@@ -998,8 +946,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpVectorTimesMatrix $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "vXm" + allTypes[allVars[op1].type]->marshal() + "X" + allTypes[allVars[op2].type]->marshal());
-			allVars[resultId] = { -1, resultType };
+			genericOp2Arg(resultType, resultId, op1, op2, "vXm" + allTypes[allVariables[op1].type]->marshal() + "X" + allTypes[allVariables[op2].type]->marshal());
 			printf("\n");
 		}
 
@@ -1009,8 +956,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			uint32_t op1 = rw();
 			uint32_t op2 = rw();
 			printf("$%d =\tOpMatrixTimesScalar $%d $%d $%d", resultId, resultType, op1, op2);
-			genericOp2(resultType, resultId, op1, op2, "mXs" + allTypes[allVars[op1].type]->marshal() + "X" + allTypes[allVars[op2].type]->marshal());
-			allVars[resultId] = { -1, resultType };
+			genericOp2Arg(resultType, resultId, op1, op2, "mXs" + allTypes[allVariables[op1].type]->marshal() + "X" + allTypes[allVariables[op2].type]->marshal());
 			printf("\n");
 		}
 
