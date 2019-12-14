@@ -8,6 +8,7 @@
 #include <map>
 #include <cassert>
 #include <set>
+#include <algorithm>
 #include "./SpirVType.h"
 
 template<typename T>
@@ -209,8 +210,7 @@ std::string loadInt(uint32_t varIndex, std::stringstream& o)
 	if (var.constantId != -1) {
 		return std::to_string(allConstantsX[var.constantId]->q<int32_t>());
 	} else {
-		o << "int " + opIs + " =  Float.floatToIntBits("+var.memory+"["+var.offset+"]);\n";
-		return opIs;
+		return "Float.floatToIntBits("+var.memory+"["+var.offset+"])";
 	}
 }
 
@@ -808,8 +808,7 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 			const auto& baseVariable = allVariables[base];
 
 			printf("$%d =\tOpAccessChain $%d $%d", resultId, resultType, base);
-			std::string opIs = "_tmp" + std::to_string(opInc++);
-			bool isFirst = true;
+			std::vector<std::string> offsets;
 			auto baseType = std::static_pointer_cast<const type_base>(allTypes[unmapPointer(baseVariable.type)]);
 			for (int i = rededWords; i < wordCount; i++) {
 				auto gafs = rw();
@@ -818,34 +817,29 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& output, std:
 				if (var.constantId != -1) {
 					uint32_t memOffset = 0;
 					baseType = baseType->accessTo(allConstantsX[gafs]->q<int32_t>(), memOffset);
-					
-						if (isFirst) {
-							output << "int " + opIs + " = " + std::to_string(memOffset) + ";\n";
-							isFirst = false;
-						}
-						else {
-							output << opIs + " += " + std::to_string(memOffset) + ";\n";
-						}					
+					offsets.push_back(std::to_string(memOffset));				
 				} else {
 					std::string id = loadInt(gafs, output); 
-					if (isFirst) {
-						output << "int " + opIs + " = " + id + " * " + std::to_string(baseType->signleType()->length()) + ";\n";
-						isFirst = false;
-					}
-					else {
-						output << opIs + " += " + id + " * " + std::to_string(baseType->signleType()->length()) + ";\n";
-					}
+					offsets.push_back(id + "*" + std::to_string(baseType->signleType()->length()));
 					uint32_t memOffset = 0;
 					baseType = baseType->accessTo(0, memOffset);
 				}
 			}
-
+			//offsets.erase(std::remove(offsets.begin(), offsets.end(), "0"), offsets.end());
+			std::string resultSums;
+			for (size_t i = 0; i < offsets.size(); i++)
+			{			
+				resultSums += offsets[i];				
+				resultSums += "+";	
+			}
+			if (resultSums.size())
+				resultSums.pop_back();
 			if (allTypes[unmapPointer(resultType)]->marshal() != baseType->marshal())
 				throw std::runtime_error("invalid access type");
 
 			allVariables[resultId] = {-1, resultType, baseVariable.memory, "_vO" + std::to_string(resultId) };
 
-			output << "int     _vO" + std::to_string(resultId) + " = "+ baseVariable.offset + " + " + opIs + ";\n";
+			output << "int     _vO" + std::to_string(resultId) + " = "+ baseVariable.offset + "+" + resultSums + ";\n";
 
 			printf("\n");
 		}	
