@@ -11,7 +11,7 @@
 #include <algorithm>
 #include "./SpirVType.h"
 
-#define printf()
+
 
 template<typename T>
 T tread(const uint8_t*& addr) 
@@ -753,7 +753,12 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& end, std::st
 
 			functionAlloc += allocType->length();
 
-			output << "Rsx.setcpy("+ allVariables[resultId].memory + ", "+ allVariables[resultId].offset + "," + allVariables[pointer].memory + "," + allVariables[pointer].offset +", " + std::to_string(allTypes[resultType]->length()) + ");//LOAD\n";
+			uint32_t copyLength = allTypes[resultType]->length();
+			if (copyLength == 1)
+				output << allVariables[resultId].memory + "[" + allVariables[resultId].offset + "] = " + allVariables[pointer].memory + "[" + allVariables[pointer].offset + "];\n";//LOAD\n";		
+			else 
+				output << "Rsx.setcpy(" + allVariables[resultId].memory + ", " + allVariables[resultId].offset + "," + allVariables[pointer].memory + "," + allVariables[pointer].offset + ", " + std::to_string(copyLength) + ");//LOAD\n";
+
 			
 			printf("\n");
 		}
@@ -899,12 +904,64 @@ void process(const std::vector<uint8_t>& binary, std::stringstream& end, std::st
 			genericOp2Arg(resultType, resultId, op1, op2, "mul");
 			printf("\n");
 		}
+		else if (instr == 199) {
+			uint32_t resultType = rw();
+			uint32_t resultId = rw();
+			uint32_t op1 = rw();
+			uint32_t op2 = rw();
+			printf("$%d =\tOpBitwiseAnd $%d $%d $%d", resultId, resultType, op1, op2);
+			genericOp2Arg(resultType, resultId, op1, op2, "bitwiseAnd");
+			printf("\n");
+		}
+		else if (instr == 198) {
+			uint32_t resultType = rw();
+			uint32_t resultId = rw();
+			uint32_t op1 = rw();
+			uint32_t op2 = rw();
+			printf("$%d =\tOpBitwiseXor $%d $%d $%d", resultId, resultType, op1, op2);
+			genericOp2Arg(resultType, resultId, op1, op2, "bitwiseXor");
+			printf("\n");
+		}
+		else if (instr == 197) {
+			uint32_t resultType = rw();
+			uint32_t resultId = rw();
+			uint32_t op1 = rw();
+			uint32_t op2 = rw();
+			printf("$%d =\tOpBitwiseOr $%d $%d $%d", resultId, resultType, op1, op2);
+			genericOp2Arg(resultType, resultId, op1, op2, "bitwiseAnd");
+			printf("\n");
+		}
+		else if (instr == 135) {
+			uint32_t resultType = rw();
+			uint32_t resultId = rw();
+			uint32_t op1 = rw();
+			uint32_t op2 = rw();
+			printf("$%d =\tOpSDiv$%d $%d $%d", resultId, resultType, op1, op2);
+			genericOp2Arg(resultType, resultId, op1, op2, "div");
+			printf("\n");
+		}
 		else if (instr == 124) {
 			uint32_t resultType = rw();
 			uint32_t resultId = rw();
 			uint32_t op1 = rw();
 			printf("$%d =\tOpBitcast $%d $%d", resultId, resultType, op1);
 			genericOp1Arg(resultType, resultId, op1, "bitcast");
+			printf("\n");
+		}
+		else if (instr == 111) {
+			uint32_t resultType = rw();
+			uint32_t resultId = rw();
+			uint32_t op1 = rw();
+			printf("$%d =\tOpConvertSToF $%d $%d", resultId, resultType, op1);
+			genericOp1Arg(resultType, resultId, op1, "signedToFloat");
+			printf("\n");
+		}
+		else if (instr == 110) {
+			uint32_t resultType = rw();
+			uint32_t resultId = rw();
+			uint32_t op1 = rw();
+			printf("$%d =\tOpConvertFToS $%d $%d", resultId, resultType, op1);
+			genericOp1Arg(resultType, resultId, op1, "floatToSigned");
 			printf("\n");
 		}
 		else if (instr == 145) {
@@ -1030,9 +1087,11 @@ void print_all_object(object x)
 	}
 }
 
+void CallTest();
 
 int main(int argc, char** argv)
 {
+	CallTest();
 	for (int i = 1; i < argc; i++) {
 		std::stringstream s; std::stringstream eg; std::stringstream ctor;
 		std::ifstream f(argv[i], std::ios::binary | std::ios::ate);

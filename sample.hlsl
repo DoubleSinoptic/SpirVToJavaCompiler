@@ -1,8 +1,11 @@
 
 cbuffer Handler : register(c0)
 {
-	float ab0;
-	float ab1;
+	int ab0;
+	int ab1;
+	int ab2;
+	int ab3;
+	int ab4;
 };
 
 static float2 poissonDisk[5] =
@@ -25,7 +28,7 @@ RWStructuredBuffer<float>	 floats : register(u2);
 void main()
 {
 	Particle part = { 0, {1, 2, 3} };
-	int a = 0;
+	int a = (ab0 + 1 * -ab1 / 3) | ab2 & ab4 ^ ab3;
 	Particles[a++] = part;
 	part.value = a + 1;
 	Particles[a++] = part;
